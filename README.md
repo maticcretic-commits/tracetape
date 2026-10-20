@@ -1,32 +1,54 @@
 # TraceTape 📼
 
-**One tape every agent run leaves behind.**
+**Every agent run produces the same evidence in a different shape: a transcript here, a log file there, a billing export somewhere else. When something goes wrong — or costs too much, or quietly changes behaviour — you reverse-engineer four formats before you can answer one question.**
 
-Every agent run produces the same evidence in a different shape: a
-transcript here, a log file there, a billing export somewhere else.
-When something goes wrong — or costs too much, or quietly changes
-behaviour — you reverse-engineer four formats before you can answer
-one question.
+TraceTape is a canonical format for that evidence, plus the tool that guards it. A tape is `trace.jsonl`: one JSON event per line, a sequence number and a timestamp on every event (the format is a first-class spec: `TRACE_FORMAT.md` in this repo). `validate` proves a tape's shape, precisely, and names every place it breaks; `summary` profiles the runs on it.
 
-TraceTape is a canonical format for that evidence, plus the tool
-that guards it. A tape is `trace.jsonl`: one JSON event per line,
-seven kinds (`run_start`, `prompt`, `tool_call`, `tool_result`,
-`message`, `error`, `run_end`), a sequence number and a timestamp on
-every event. Any agent that writes the tape can be replayed, audited,
-costed and regression-checked from the same record. Any tool that
-reads the tape can trust its shape — because `validate` proves the
-shape, precisely, and names every place it breaks.
-
-The format is a first-class spec: **[TRACE_FORMAT.md](TRACE_FORMAT.md)**.
-This tool defines it, validates against it, and summarizes tapes.
-
-Offline and dependency-free: stdlib-only Python, no network, no
-account, fully deterministic. Same tape, same report, every time.
+*Part of **AgentForge** — verify AI-agent work before you ship it.*
+*The family: [AgentProof](https://github.com/maticcretic-commits/agentproof) · [PromptRE](https://github.com/maticcretic-commits/promptre) · [AgentCI](https://github.com/maticcretic-commits/agentci) · [SecretScan](https://github.com/maticcretic-commits/secretscan) · [CostLedger](https://github.com/maticcretic-commits/costledger) · [SchemaGuard](https://github.com/maticcretic-commits/schemaguard) · [SkillAudit](https://github.com/maticcretic-commits/skillaudit) · [PromptDiff](https://github.com/maticcretic-commits/promptdiff) · [TraceTape](https://github.com/maticcretic-commits/tracetape) · [PromptLint](https://github.com/maticcretic-commits/promptlint) · [ClaimCheck](https://github.com/maticcretic-commits/claimcheck) · [TrustBadge](https://github.com/maticcretic-commits/trustbadge)*
 
 ```bash
-python src/tracetape.py validate runs/trace.jsonl
-python src/tracetape.py validate runs/            # every .jsonl inside
-python src/tracetape.py summary runs/trace.jsonl
+$ tracetape validate examples/broken.jsonl
+```
+
+```
+====================================================================
+TraceTape — validation report
+====================================================================
+File:   examples/broken.jsonl
+Events: 6 · Runs: 1 · Blank lines: 0
+Result: ❌ INVALID — 3 error(s), 1 warning(s)
+
+## Errors
+  line 5    [dangling-parent] run 'broken-2026-10-20': parent 42 does not match any earlier seq in this run
+  line 6    [bad-timestamp] 'ts' is not a parseable ISO-8601 timestamp: '20 Oct 2026, morning'
+
+## Incomplete runs
+  line 6    [incomplete] run 'broken-2026-10-20': run_start with no matching run_end — the tape stops mid-run (6 events)
+
+## Warnings
+  line 4    [seq-gap] run 'broken-2026-10-20': seq jumps 3 → 5 (no event with seq 4)
+```
+
+*Exit code 1 — the tape is INVALID. The bundled `examples/good.jsonl` validates clean (17 events, 2 runs, exit 0).*
+
+## Install
+
+```bash
+pipx install git+https://github.com/maticcretic-commits/tracetape
+# or, into the current environment:
+pip install git+https://github.com/maticcretic-commits/tracetape
+```
+
+Then run it as `tracetape …` (Python 3.9+, no dependencies — stdlib only).
+PyPI release planned; until then, the git URL above is the install path.
+
+From source — it is a single file, so no install is needed at all:
+
+```bash
+git clone https://github.com/maticcretic-commits/tracetape
+cd tracetape
+python src/tracetape.py …
 ```
 
 ## The commands
@@ -193,10 +215,28 @@ small and single-purpose because the evidence underneath them is
 stable: define the tape once, validate it mechanically, and every
 check built on top inherits the same ground truth.
 
+## Exit codes & JSON output
+
+All AgentForge tools share one contract (full text in
+[CONVENTIONS.md](CONVENTIONS.md)):
+
+| Code | Meaning |
+|------|---------|
+| `0` | Clean / PASS — no findings at or above the tool's fail threshold |
+| `1` | Findings / FAIL — the tool ran fine; the answer is “no” |
+| `2` | Caller error — bad arguments, missing or unreadable input |
+| `3` | Environment error — the tool itself could not run |
+
+On a caller error the tool also prints one JSON line to stderr:
+`{"error": {"code": "file_not_found", "message": "no such file: x"}}`.
+
+JSON output (`--format json`) always carries the family envelope —
+`{"tool": "tracetape", "version": "1.0.0", "schema_version": 1}` — alongside
+the tool's own payload keys, unchanged.
+
 ## Part of AgentForge
 
-TraceTape is the ninth tool in the [AgentForge](https://github.com/maticcretic-commits)
-trust layer for AI agents:
+TraceTape is one of the 12 tools in the [AgentForge](https://github.com/maticcretic-commits) family — offline, stdlib-only tools to **verify AI-agent work before you ship it**:
 
 - **AgentProof** — verify agent work — [github.com/maticcretic-commits/agentproof](https://github.com/maticcretic-commits/agentproof)
 - **PromptRE** — reverse-engineer agent prompts — [github.com/maticcretic-commits/promptre](https://github.com/maticcretic-commits/promptre)
