@@ -536,3 +536,38 @@ def test_cli_validate_missing_target_error_envelope():
     err = _stderr_envelope(r)
     assert err["code"] == "file_not_found"
     assert err["message"] == "no such file or directory: /nonexistent/x.jsonl"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: stdin tapes (pipe composability)
+# ---------------------------------------------------------------------------
+
+def test_validate_stdin():
+    cli = Path(__file__).parent.parent / "src" / "tracetape.py"
+    ex = Path(__file__).parent.parent / "examples"
+    proc = subprocess.run(
+        [sys.executable, str(cli), "validate", "-", "--format", "json"],
+        input=(ex / "good.jsonl").read_text(),
+        capture_output=True, text=True)
+    assert proc.returncode == 0
+    data = json.loads(proc.stdout)  # stdout is pure JSON
+    assert data["files"][0]["file"] == "<stdin>"
+    assert data["ok"] is True
+    bad = subprocess.run(
+        [sys.executable, str(cli), "validate", "-", "--format", "json"],
+        input=(ex / "broken.jsonl").read_text(),
+        capture_output=True, text=True)
+    assert bad.returncode == 1
+
+
+def test_summary_stdin():
+    cli = Path(__file__).parent.parent / "src" / "tracetape.py"
+    ex = Path(__file__).parent.parent / "examples"
+    proc = subprocess.run(
+        [sys.executable, str(cli), "summary", "-", "--format", "json"],
+        input=(ex / "good.jsonl").read_text(),
+        capture_output=True, text=True)
+    assert proc.returncode == 0
+    data = json.loads(proc.stdout)
+    assert data["file"] == "<stdin>"
+    assert data["totals"]["runs"] >= 1
