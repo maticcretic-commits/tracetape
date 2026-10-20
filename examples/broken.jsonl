@@ -1,0 +1,6 @@
+{"v": 1, "ts": "2026-10-20T09:00:00Z", "run": "broken-2026-10-20", "seq": 1, "kind": "run_start", "name": "flaky-agent"}
+{"v": 1, "ts": "2026-10-20T09:00:01Z", "run": "broken-2026-10-20", "seq": 2, "kind": "prompt", "name": "user-prompt", "tokens_in": 88}
+{"v": 1, "ts": "2026-10-20T09:00:02Z", "run": "broken-2026-10-20", "seq": 3, "kind": "tool_call", "name": "web_search", "data": {"query_ref": "q-102"}}
+{"v": 1, "ts": "2026-10-20T09:00:04Z", "run": "broken-2026-10-20", "seq": 5, "kind": "tool_result", "name": "web_search", "parent": 3, "dur_ms": 1510, "ok": true}
+{"v": 1, "ts": "2026-10-20T09:00:05Z", "run": "broken-2026-10-20", "seq": 6, "kind": "tool_call", "name": "fetch_page", "parent": 42, "data": {"url_ref": "result-1"}}
+{"v": 1, "ts": "20 Oct 2026, morning", "run": "broken-2026-10-20", "seq": 7, "kind": "message", "name": "assistant-reply", "tokens_in": 700, "tokens_out": 190}
