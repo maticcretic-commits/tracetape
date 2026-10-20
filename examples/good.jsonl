@@ -1,0 +1,17 @@
+{"v": 1, "ts": "2026-10-20T08:15:00Z", "run": "checkout-2026-10-20-a", "seq": 1, "kind": "run_start", "name": "research-agent"}
+{"v": 1, "ts": "2026-10-20T08:15:01Z", "run": "checkout-2026-10-20-a", "seq": 2, "kind": "prompt", "name": "user-prompt", "tokens_in": 96, "data": {"sha256": "c41d77…", "chars": 388}}
+{"v": 1, "ts": "2026-10-20T08:15:02Z", "run": "checkout-2026-10-20-a", "seq": 3, "kind": "tool_call", "name": "web_search", "data": {"query_ref": "q-881", "results": 10}}
+{"v": 1, "ts": "2026-10-20T08:15:03Z", "run": "checkout-2026-10-20-a", "seq": 4, "kind": "tool_result", "name": "web_search", "parent": 3, "dur_ms": 640, "ok": true}
+{"v": 1, "ts": "2026-10-20T08:15:04Z", "run": "checkout-2026-10-20-a", "seq": 5, "kind": "tool_call", "name": "fetch_page", "parent": 4, "data": {"url_ref": "result-3"}}
+{"v": 1, "ts": "2026-10-20T08:15:06Z", "run": "checkout-2026-10-20-a", "seq": 6, "kind": "tool_result", "name": "fetch_page", "parent": 5, "dur_ms": 1240, "ok": true}
+{"v": 1, "ts": "2026-10-20T08:15:09Z", "run": "checkout-2026-10-20-a", "seq": 7, "kind": "message", "name": "assistant-reply", "tokens_in": 1520, "tokens_out": 386, "cost": "0.0114", "data": {"sha256": "77aa10…"}}
+{"v": 1, "ts": "2026-10-20T08:15:09Z", "run": "checkout-2026-10-20-a", "seq": 8, "kind": "run_end", "name": "research-agent", "ok": true}
+{"v": 1, "ts": "2026-10-20T08:20:00Z", "run": "digest-2026-10-20-b", "seq": 1, "kind": "run_start", "name": "digest-agent"}
+{"v": 1, "ts": "2026-10-20T08:20:01Z", "run": "digest-2026-10-20-b", "seq": 2, "kind": "prompt", "name": "user-prompt", "tokens_in": 54, "data": {"sha256": "0be3f2…", "chars": 201}}
+{"v": 1, "ts": "2026-10-20T08:20:02Z", "run": "digest-2026-10-20-b", "seq": 3, "kind": "tool_call", "name": "summarize", "data": {"doc_ref": "digest-input"}}
+{"v": 1, "ts": "2026-10-20T08:20:05Z", "run": "digest-2026-10-20-b", "seq": 4, "kind": "tool_result", "name": "summarize", "parent": 3, "dur_ms": 2980, "ok": false}
+{"v": 1, "ts": "2026-10-20T08:20:05Z", "run": "digest-2026-10-20-b", "seq": 5, "kind": "error", "name": "summarize", "parent": 3, "ok": false, "data": {"error": "input too long", "handled": true, "action": "chunked and retried"}}
+{"v": 1, "ts": "2026-10-20T08:20:06Z", "run": "digest-2026-10-20-b", "seq": 6, "kind": "tool_call", "name": "summarize", "data": {"doc_ref": "digest-input", "chunk": 1}}
+{"v": 1, "ts": "2026-10-20T08:20:09Z", "run": "digest-2026-10-20-b", "seq": 7, "kind": "tool_result", "name": "summarize", "parent": 6, "dur_ms": 3110, "ok": true}
+{"v": 1, "ts": "2026-10-20T08:20:10Z", "run": "digest-2026-10-20-b", "seq": 8, "kind": "message", "name": "assistant-reply", "tokens_in": 980, "tokens_out": 240, "cost": "0.0071", "data": {"sha256": "51cd9e…"}}
+{"v": 1, "ts": "2026-10-20T08:20:10Z", "run": "digest-2026-10-20-b", "seq": 9, "kind": "run_end", "name": "digest-agent", "ok": true}
