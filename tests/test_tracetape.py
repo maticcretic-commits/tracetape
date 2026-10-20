@@ -474,3 +474,65 @@ def test_init_sample_contains_a_handled_error(tmp_path):
     r = runs[0]
     assert r["tools"]["run_tests"]["errors"] == 1
     assert r["by_kind"]["error"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: envelope, error envelope, --version
+# ---------------------------------------------------------------------------
+
+def _stderr_envelope(result):
+    for line in result.stderr.splitlines():
+        line = line.strip()
+        if line.startswith('{"error"'):
+            return json.loads(line)["error"]
+    raise AssertionError(f"no error envelope in stderr: {result.stderr!r}")
+
+
+def test_cli_validate_json_has_schema_version_no_findings_summary():
+    r = run_cli("validate", str(EXAMPLES / "good.jsonl"),
+                "--format", "json")
+    assert r.returncode == 0
+    out = json.loads(r.stdout)
+    assert out["schema_version"] == 1
+    assert isinstance(out["schema_version"], int)
+    assert "findings_summary" not in out
+
+
+def test_cli_summary_json_has_schema_version():
+    r = run_cli("summary", str(EXAMPLES / "good.jsonl"),
+                "--format", "json")
+    assert r.returncode == 0
+    out = json.loads(r.stdout)
+    assert out["schema_version"] == 1
+    assert isinstance(out["schema_version"], int)
+    assert "findings_summary" not in out
+
+
+def test_cli_version_flag():
+    r = run_cli("--version")
+    assert r.returncode == 0
+    assert r.stdout.strip() == "tracetape 1.0.0"
+
+
+def test_cli_summary_missing_file_error_envelope():
+    r = run_cli("summary", "/nonexistent/x.jsonl")
+    assert r.returncode == 2
+    assert "error: no such file: /nonexistent/x.jsonl" in r.stderr
+    err = _stderr_envelope(r)
+    assert err["code"] == "file_not_found"
+    assert err["message"] == "no such file: /nonexistent/x.jsonl"
+
+
+def test_cli_summary_directory_error_envelope(tmp_path):
+    r = run_cli("summary", str(tmp_path))
+    assert r.returncode == 2
+    err = _stderr_envelope(r)
+    assert err["code"] == "not_a_file"
+
+
+def test_cli_validate_missing_target_error_envelope():
+    r = run_cli("validate", "/nonexistent/x.jsonl")
+    assert r.returncode == 2
+    err = _stderr_envelope(r)
+    assert err["code"] == "file_not_found"
+    assert err["message"] == "no such file or directory: /nonexistent/x.jsonl"
