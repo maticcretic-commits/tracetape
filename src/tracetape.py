@@ -640,14 +640,34 @@ def print_summary_text(file_label, runs, totals):
 # CLI
 # ---------------------------------------------------------------------------
 
+def _emit_error(code, message):
+    """Print the human error line plus the JSON error envelope to
+    stderr (CONVENTIONS.md: caller errors carry both)."""
+    print(f"error: {message}", file=sys.stderr)
+    print(json.dumps({"error": {"code": code, "message": message}}),
+          file=sys.stderr)
+
+
+def _fatal_code(fatal):
+    """Map a validate_path fatal string to an error-envelope code."""
+    if fatal.startswith("no such file or directory:"):
+        return "file_not_found"
+    if fatal.startswith("no .jsonl files found under"):
+        return "invalid_input"
+    if fatal.startswith("error:"):
+        return "read_error"
+    return "invalid_input"
+
+
 def cmd_validate(args):
     reports, fatal = validate_path(args.target,
                                    allow_incomplete=args.allow_incomplete)
     if fatal:
-        print(f"error: {fatal}", file=sys.stderr)
+        _emit_error(_fatal_code(fatal), fatal)
         return 2
     if args.format == "json":
         out = {"tool": "tracetape", "version": VERSION,
+               "schema_version": 1,
                "command": "validate",
                "ok": all(r["ok"] for r in reports),
                "files": reports}
@@ -664,21 +684,22 @@ def cmd_validate(args):
 def cmd_summary(args):
     p = Path(args.file)
     if p.is_dir():
-        print("error: summary takes a single tape file, not a "
-              "directory", file=sys.stderr)
+        _emit_error("not_a_file",
+                    "summary takes a single tape file, not a directory")
         return 2
     if not p.is_file():
-        print(f"error: no such file: {args.file}", file=sys.stderr)
+        _emit_error("file_not_found", f"no such file: {args.file}")
         return 2
     try:
         text = _read(p)
     except OSError as e:
-        print(f"error: {e}", file=sys.stderr)
+        _emit_error("read_error", f"{e}")
         return 2
     parsed, _findings, _blank = parse_lines(text)
     runs, totals = summarize_parsed(parsed)
     if args.format == "json":
         out = {"tool": "tracetape", "version": VERSION,
+               "schema_version": 1,
                "command": "summary", "file": args.file,
                "runs": runs, "totals": totals}
         print(json.dumps(out, indent=2, ensure_ascii=False))
@@ -744,6 +765,11 @@ def main(argv=None):
         description="Define, validate and summarize the canonical "
                     "agent run tape (trace.jsonl). One tape every "
                     "agent run leaves behind.")
+    ap.add_argument("--version", action="version",
+                    version=f"tracetape {VERSION}")
+    ap.add_argument("--no-color", action="store_true",
+                    help="disable ANSI color output (this tool emits "
+                         "no color; accepted harmlessly)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     v = sub.add_parser("validate", help="check a tape (or a directory "
