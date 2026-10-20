@@ -660,8 +660,15 @@ def _fatal_code(fatal):
 
 
 def cmd_validate(args):
-    reports, fatal = validate_path(args.target,
-                                   allow_incomplete=args.allow_incomplete)
+    if args.target == "-":
+        # Pipe composability (CONVENTIONS.md): one tape arrives on
+        # stdin and is validated in memory — no temp file needed.
+        reports = [validate_text(sys.stdin.read(), "<stdin>",
+                                 allow_incomplete=args.allow_incomplete)]
+        fatal = None
+    else:
+        reports, fatal = validate_path(
+            args.target, allow_incomplete=args.allow_incomplete)
     if fatal:
         _emit_error(_fatal_code(fatal), fatal)
         return 2
@@ -682,29 +689,37 @@ def cmd_validate(args):
 
 
 def cmd_summary(args):
-    p = Path(args.file)
-    if p.is_dir():
-        _emit_error("not_a_file",
-                    "summary takes a single tape file, not a directory")
-        return 2
-    if not p.is_file():
-        _emit_error("file_not_found", f"no such file: {args.file}")
-        return 2
-    try:
-        text = _read(p)
-    except OSError as e:
-        _emit_error("read_error", f"{e}")
-        return 2
+    if args.file == "-":
+        # Pipe composability (CONVENTIONS.md): summarize stdin.
+        text = sys.stdin.read().replace("\r\n", "\n").replace(
+            "\r", "\n")
+        label = "<stdin>"
+    else:
+        p = Path(args.file)
+        if p.is_dir():
+            _emit_error("not_a_file",
+                        "summary takes a single tape file, not a "
+                        "directory")
+            return 2
+        if not p.is_file():
+            _emit_error("file_not_found", f"no such file: {args.file}")
+            return 2
+        try:
+            text = _read(p)
+        except OSError as e:
+            _emit_error("read_error", f"{e}")
+            return 2
+        label = args.file
     parsed, _findings, _blank = parse_lines(text)
     runs, totals = summarize_parsed(parsed)
     if args.format == "json":
         out = {"tool": "tracetape", "version": VERSION,
                "schema_version": 1,
-               "command": "summary", "file": args.file,
+               "command": "summary", "file": label,
                "runs": runs, "totals": totals}
         print(json.dumps(out, indent=2, ensure_ascii=False))
     else:
-        print_summary_text(args.file, runs, totals)
+        print_summary_text(label, runs, totals)
     return 0
 
 
@@ -775,7 +790,8 @@ def main(argv=None):
     v = sub.add_parser("validate", help="check a tape (or a directory "
                                         "of tapes) against the format")
     v.add_argument("target", help="a .jsonl tape file, or a directory "
-                                  "of them")
+                                  "of them ('-' reads one tape from "
+                                  "stdin)")
     v.add_argument("--format", choices=("text", "json"), default="text")
     v.add_argument("--strict", action="store_true",
                    help="exit 1 on warnings as well as errors")
@@ -785,7 +801,8 @@ def main(argv=None):
     v.set_defaults(fn=cmd_validate)
 
     s = sub.add_parser("summary", help="profile the runs on a tape")
-    s.add_argument("file", help="the .jsonl tape file to summarize")
+    s.add_argument("file", help="the .jsonl tape file to summarize "
+                                "('-' reads stdin)")
     s.add_argument("--format", choices=("text", "json"), default="text")
     s.set_defaults(fn=cmd_summary)
 
