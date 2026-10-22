@@ -80,6 +80,78 @@ An `error` event is **not** a conformance problem. Failure is data;
 a tape with recorded, handled errors is a good tape. A tape that
 omits the failure is the bad one.
 
+## Handoff events
+
+Multi-agent work is a chain of hand-offs, and the chain is where
+context silently rots: agent A finishes, agent B starts from a
+summary of a summary, and nobody can later prove what B was
+actually given. The format records hand-offs as a **data
+convention** — no new kind, so tapes stay version 1:
+
+A hand-off is any event whose `data` carries a `handoff` object:
+
+```json
+{"v": 1, "ts": "2026-10-21T10:00:06Z", "run": "triage-1", "seq": 5, "kind": "message", "name": "handoff-note", "data": {"handoff": {"from": "triage-agent", "to": "billing-agent", "context_sha256": "f3a91c…", "reason": "refund decision needed"}}}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `from` | The handing-off agent (required, non-empty string). |
+| `to` | The receiving agent (required, non-empty string). |
+| `context_sha256` | Hash of the context package the receiver got (recommended — a hand-off without one is *unattested*: the tape proves a hand-off happened, not what was handed over). `sha256` is accepted as an alias key. |
+
+The sender records the hand-off on its side (typically a `message`
+event before its `run_end`); the receiver may record the same
+hand-off in its own run (typically on its first `prompt` event) —
+that second record is a *receipt echo*, not a second hand-off.
+
+Tooling: `validate` warns (`handoff-shape`) on malformed payloads
+without invalidating the tape; `summary` lists each run's hand-offs
+with their attestation state; `tracetape handoffs` audits the whole
+chain — unattested hand-offs, chain breaks (a hand-off whose
+receiver is not the next hand-off's sender), and hand-offs that are
+never answered (the receiver neither hands off onward nor starts a
+run on the tape).
+
+## Proof bundles
+
+A tape is evidence; a **proof bundle** is that evidence sealed for
+handing to someone else. `tracetape bundle` writes one JSON
+document:
+
+```json
+{"tool": "tracetape", "version": "1.1.0", "schema_version": 1,
+ "kind": "proof-bundle", "bundle_version": 1,
+ "sections": { "...": "..." },
+ "bundle_sha256": "…"}
+```
+
+Sections (only `tape` is mandatory; the rest are sealed when the
+caller supplies them):
+
+| Section | Contents |
+|---------|----------|
+| `tape` | The tape's file SHA-256, event/run counts, the validation warning count, every `data.sha256` evidence hash on the tape, and the full `summary` profile. The tape must validate clean — an invalid tape is refused, never sealed. |
+| `claims` | A claims/report file: its SHA-256 plus the SHA-256 of every claim-bearing line (non-empty, outside code fences, not a heading), so edited or dropped claims are individually visible. |
+| `skill_manifest` | A skill directory as a manifest: per-file `{path, sha256, bytes}`, the skill `name` from its SKILL.md frontmatter, file count and total bytes. |
+| `tool_outputs` | Sibling tool JSON reports, each with its file SHA-256 and envelope (`tool`, `version`, plus `verdict`/`ok`/`score` when present). |
+| `cost_record` | A cost record (e.g. a CostLedger ledger): file SHA-256, the extracted total and the key it came from (`totals.cost_usd` for CostLedger), currency when stated. An unrecognized shape records `total: null` — unknown, never guessed. |
+| `schema_contract` | A JSON Schema file: SHA-256 plus its `title` / `$id` when present. |
+| `trustbadge` | A TrustBadge report: file SHA-256, `composite`, `capped`, `coverage`. |
+
+`bundle_sha256` is the SHA-256 of the bundle's own canonical JSON
+(sorted keys, compact separators, the digest field itself excluded)
+— altering any sealed value, including the TrustBadge score,
+breaks it. File paths are recorded as given; `tracetape verify`
+resolves them as recorded, relative to the bundle, or by basename
+next to the bundle, and then re-checks everything: envelope and
+digest, every file's presence and hash, the tape's continued
+validity, the claims manifest, and the skill manifest. Exit 0 =
+the proof still holds; 1 = a named finding (`missing-evidence`,
+`hash-mismatch`, `tape-invalid`, `tape-drift`, `claims-drift`,
+`manifest-drift`, `bundle-structure`, `bundle-digest`); 2 = the
+bundle itself is missing or unreadable.
+
 ## Multi-run files
 
 A file may hold many runs — batch jobs and nightly suites usually
