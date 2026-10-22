@@ -511,7 +511,7 @@ def test_cli_summary_json_has_schema_version():
 def test_cli_version_flag():
     r = run_cli("--version")
     assert r.returncode == 0
-    assert r.stdout.strip() == "tracetape 1.0.0"
+    assert r.stdout.strip() == "tracetape 1.1.0"
 
 
 def test_cli_summary_missing_file_error_envelope():
@@ -571,3 +571,295 @@ def test_summary_stdin():
     data = json.loads(proc.stdout)
     assert data["file"] == "<stdin>"
     assert data["totals"]["runs"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: handoff events (L9)
+# ---------------------------------------------------------------------------
+
+from tracetape import analyze_handoffs, extract_handoffs  # noqa: E402
+
+
+def handoff_tape(payload, run="r1", name="agent-a", to_run=None):
+    """One run that hands off, optionally followed by the receiver's
+    own run (which answers the handoff)."""
+    events = [
+        ev(1, "run_start", run=run, name=name),
+        ev(2, "message", run=run, name="handoff-note",
+           data={"handoff": payload}),
+        ev(3, "run_end", run=run, name=name, ok=True),
+    ]
+    text = tape(*events)
+    if to_run:
+        text += tape(
+            ev(1, "run_start", run=to_run, name=payload.get("to", "?")),
+            ev(2, "run_end", run=to_run, name=payload.get("to", "?"),
+               ok=True),
+        )
+    return text
+
+
+def test_handoff_example_file_is_clean():
+    rep = validate_text((EXAMPLES / "handoff.jsonl").read_text())
+    assert rep["ok"] and rep["warnings"] == []
+    r = run_cli("handoffs", str(EXAMPLES / "handoff.jsonl"),
+                "--format", "json")
+    assert r.returncode == 0
+    data = json.loads(r.stdout)
+    assert data["ok"] is True
+    assert len(data["handoffs"]) == 2
+    assert all(h["attested"] for h in data["handoffs"])
+
+
+def test_handoff_extraction_fields():
+    text = handoff_tape({"from": "a", "to": "b",
+                         "context_sha256": "abc123"},
+                        to_run="r2")
+    parsed, _f, _b = parse_lines(text)
+    recs = extract_handoffs(parsed)
+    assert len(recs) == 1
+    rec = recs[0]
+    assert rec["from"] == "a" and rec["to"] == "b"
+    assert rec["context_sha256"] == "abc123" and rec["attested"] is True
+    assert rec["problems"] == []
+
+
+def test_handoff_unattested_is_a_finding():
+    text = handoff_tape({"from": "a", "to": "b"}, to_run="r2")
+    parsed, _f, _b = parse_lines(text)
+    _recs, findings = analyze_handoffs(parsed)
+    assert [f["cls"] for f in findings] == ["handoff-unattested"]
+
+
+def test_handoff_unanswered_is_a_finding():
+    text = handoff_tape({"from": "a", "to": "ghost",
+                         "context_sha256": "abc"})
+    parsed, _f, _b = parse_lines(text)
+    _recs, findings = analyze_handoffs(parsed)
+    assert [f["cls"] for f in findings] == ["handoff-unanswered"]
+
+
+def test_handoff_receipt_echo_is_not_unanswered():
+    # The receiver records the same handoff inside its own run (the
+    # prompt event in examples/handoff.jsonl): an echo, not a second
+    # unanswered handoff.
+    text = tape(
+        ev(1, "run_start", run="r1", name="a"),
+        ev(2, "message", run="r1", name="note",
+           data={"handoff": {"from": "a", "to": "b",
+                             "context_sha256": "x"}}),
+        ev(3, "run_end", run="r1", name="a", ok=True),
+        ev(1, "run_start", run="r2", name="b"),
+        ev(2, "prompt", run="r2", name="handoff-context",
+           data={"handoff": {"from": "a", "to": "b",
+                             "context_sha256": "x"}}),
+        ev(3, "run_end", run="r2", name="b", ok=True),
+    )
+    parsed, _f, _b = parse_lines(text)
+    _recs, findings = analyze_handoffs(parsed)
+    assert findings == []
+
+
+def test_handoff_chain_break_is_a_finding():
+    text = tape(
+        ev(1, "run_start", run="r1", name="a"),
+        ev(2, "message", run="r1", name="n1",
+           data={"handoff": {"from": "a", "to": "b",
+                             "context_sha256": "x"}}),
+        ev(3, "message", run="r1", name="n2",
+           data={"handoff": {"from": "c", "to": "a",
+                             "context_sha256": "y"}}),
+        ev(4, "run_end", run="r1", name="a", ok=True),
+    )
+    parsed, _f, _b = parse_lines(text)
+    _recs, findings = analyze_handoffs(parsed)
+    assert "handoff-chain" in [f["cls"] for f in findings]
+
+
+def test_handoff_malformed_warns_in_validate_but_stays_valid():
+    text = handoff_tape({"from": "a"})  # no "to"
+    rep = validate_text(text)
+    assert rep["ok"] is True  # warnings never invalidate a tape
+    assert [f["cls"] for f in rep["warnings"]] == ["handoff-shape"]
+
+
+def test_handoff_non_object_payload_warns():
+    text = handoff_tape("just-a-string")
+    rep = validate_text(text)
+    assert rep["ok"] is True
+    assert rep["warnings"][0]["cls"] == "handoff-shape"
+
+
+def test_summary_lists_handoffs_per_run():
+    parsed, _f, _b = parse_lines(
+        (EXAMPLES / "handoff.jsonl").read_text())
+    runs, _totals = summarize_parsed(parsed)
+    by_run = {r["run"]: r for r in runs}
+    assert by_run["triage-2026-10-21"]["handoffs"] == [
+        {"seq": 5, "from": "triage-agent", "to": "billing-agent",
+         "attested": True}]
+    assert by_run["billing-2026-10-21"]["handoffs"][0]["attested"]
+
+
+def test_handoffs_cli_exit_codes(tmp_path):
+    bad = tmp_path / "lonely.jsonl"
+    bad.write_text(handoff_tape({"from": "a", "to": "ghost",
+                                 "context_sha256": "z"}))
+    r = run_cli("handoffs", str(bad))
+    assert r.returncode == 1
+    r2 = run_cli("handoffs", str(tmp_path / "nope.jsonl"))
+    assert r2.returncode == 2
+    assert '"code": "file_not_found"' in r2.stderr
+
+
+def test_handoffs_stdin():
+    proc = subprocess.run(
+        [sys.executable, str(CLI), "handoffs", "-", "--format", "json"],
+        input=(EXAMPLES / "handoff.jsonl").read_text(),
+        capture_output=True, text=True)
+    assert proc.returncode == 0
+    assert json.loads(proc.stdout)["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: proof bundles (bundle / verify)
+# ---------------------------------------------------------------------------
+
+from tracetape import build_bundle, verify_bundle  # noqa: E402
+
+
+def _bundle_workspace(tmp_path):
+    """A small sealed world: tape + claims + skill + cost + schema."""
+    (tmp_path / "tape.jsonl").write_text(good_run())
+    (tmp_path / "claims.md").write_text(
+        "# Report\n\n- First claim here.\n- Second claim here.\n")
+    skill = tmp_path / "skill-x"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\nname: skill-x\ndescription: demo\n---\n# X\n")
+    (skill / "run.py").write_text("print('x')\n")
+    (tmp_path / "cost.json").write_text(json.dumps(
+        {"totals": {"cost_usd": "0.42"}, "currency": "USD"}))
+    (tmp_path / "schema.json").write_text(json.dumps(
+        {"title": "Contract", "type": "object"}))
+    (tmp_path / "tb.json").write_text(json.dumps(
+        {"tool": "trustbadge", "version": "1.0.0", "composite": 88,
+         "capped": False, "coverage": {"ran": 11, "total": 11}}))
+    return tmp_path
+
+
+def _seal(tmp_path):
+    return build_bundle(
+        tmp_path / "tape.jsonl", claims=tmp_path / "claims.md",
+        skill=tmp_path / "skill-x", cost=tmp_path / "cost.json",
+        schema=tmp_path / "schema.json",
+        trustbadge=tmp_path / "tb.json",
+        reports=[tmp_path / "tb.json"])
+
+
+def test_bundle_structure_and_digest(tmp_path):
+    _bundle_workspace(tmp_path)
+    bundle = _seal(tmp_path)
+    assert bundle["kind"] == "proof-bundle"
+    assert bundle["bundle_version"] == 1
+    secs = bundle["sections"]
+    assert secs["tape"]["events"] == 6
+    assert secs["claims"]["count"] == 2
+    assert secs["skill_manifest"]["name"] == "skill-x"
+    assert secs["skill_manifest"]["file_count"] == 2
+    assert secs["cost_record"]["total"] == "0.42"
+    assert secs["cost_record"]["total_key"] == "totals.cost_usd"
+    assert secs["schema_contract"]["title"] == "Contract"
+    assert secs["trustbadge"]["composite"] == 88
+    assert secs["tool_outputs"][0]["tool"] == "trustbadge"
+    findings, status = verify_bundle(bundle, str(tmp_path / "b.json"))
+    assert findings == []
+    assert status["tape"] == "ok"
+
+
+def test_bundle_verify_roundtrip_via_cli(tmp_path):
+    _bundle_workspace(tmp_path)
+    out = tmp_path / "bundle.json"
+    r = run_cli("bundle", str(tmp_path / "tape.jsonl"),
+                "--claims", str(tmp_path / "claims.md"),
+                "--skill", str(tmp_path / "skill-x"),
+                "--cost", str(tmp_path / "cost.json"),
+                "--schema", str(tmp_path / "schema.json"),
+                "--trustbadge", str(tmp_path / "tb.json"),
+                "--out", str(out), "--format", "json")
+    assert r.returncode == 0
+    assert out.is_file()
+    r2 = run_cli("verify", str(out), "--format", "json")
+    assert r2.returncode == 0
+    assert json.loads(r2.stdout)["ok"] is True
+
+
+def test_verify_detects_tampered_evidence(tmp_path):
+    _bundle_workspace(tmp_path)
+    bundle = _seal(tmp_path)
+    (tmp_path / "claims.md").write_text(
+        "# Report\n\n- First claim here.\n- A DIFFERENT claim.\n")
+    findings, status = verify_bundle(bundle, str(tmp_path / "b.json"))
+    clss = [f["cls"] for f in findings]
+    assert "hash-mismatch" in clss and "claims-drift" in clss
+    assert status["claims"] == "drift"
+
+
+def test_verify_detects_missing_evidence(tmp_path):
+    _bundle_workspace(tmp_path)
+    bundle = _seal(tmp_path)
+    (tmp_path / "cost.json").unlink()
+    findings, status = verify_bundle(bundle, str(tmp_path / "b.json"))
+    assert any(f["cls"] == "missing-evidence" for f in findings)
+    assert status["cost_record"] == "missing"
+
+
+def test_verify_detects_skill_manifest_drift(tmp_path):
+    _bundle_workspace(tmp_path)
+    bundle = _seal(tmp_path)
+    (tmp_path / "skill-x" / "run.py").write_text("print('pwned')\n")
+    findings, status = verify_bundle(bundle, str(tmp_path / "b.json"))
+    assert any(f["cls"] == "manifest-drift" for f in findings)
+    assert status["skill_manifest"] == "drift"
+
+
+def test_verify_detects_envelope_tampering(tmp_path):
+    _bundle_workspace(tmp_path)
+    bundle = _seal(tmp_path)
+    bundle["sections"]["trustbadge"]["composite"] = 100  # grade inflation
+    findings, _status = verify_bundle(bundle, str(tmp_path / "b.json"))
+    assert any(f["cls"] == "bundle-digest" for f in findings)
+
+
+def test_bundle_refuses_invalid_tape(tmp_path):
+    (tmp_path / "bad.jsonl").write_text(
+        (EXAMPLES / "broken.jsonl").read_text())
+    r = run_cli("bundle", str(tmp_path / "bad.jsonl"))
+    assert r.returncode == 1
+    assert "refusing to seal" in r.stderr
+
+
+def test_bundle_missing_companion_is_caller_error(tmp_path):
+    (tmp_path / "tape.jsonl").write_text(good_run())
+    r = run_cli("bundle", str(tmp_path / "tape.jsonl"),
+                "--claims", str(tmp_path / "nope.md"))
+    assert r.returncode == 2
+    assert '"code": "file_not_found"' in r.stderr
+
+
+def test_verify_missing_bundle_is_caller_error(tmp_path):
+    r = run_cli("verify", str(tmp_path / "nope.json"))
+    assert r.returncode == 2
+    assert '"code": "file_not_found"' in r.stderr
+
+
+def test_bundle_records_tape_evidence_hashes(tmp_path):
+    (tmp_path / "tape.jsonl").write_text(good_run())
+    bundle = build_bundle(tmp_path / "tape.jsonl")
+    # good_run's prompt data carries no sha256; the message event's
+    # data has none either — the list is honestly empty, and the
+    # tape's own file hash is the master evidence hash.
+    assert bundle["sections"]["tape"]["evidence_hashes"] == []
+    assert len(bundle["sections"]["tape"]["sha256"]) == 64
+    findings, _s = verify_bundle(bundle, str(tmp_path / "b.json"))
+    assert findings == []
