@@ -1,0 +1,12 @@
+{"v": 1, "ts": "2026-10-21T10:00:00Z", "run": "triage-2026-10-21", "seq": 1, "kind": "run_start", "name": "triage-agent"}
+{"v": 1, "ts": "2026-10-21T10:00:01Z", "run": "triage-2026-10-21", "seq": 2, "kind": "prompt", "name": "user-prompt", "tokens_in": 64, "data": {"sha256": "aa10c1…", "chars": 210}}
+{"v": 1, "ts": "2026-10-21T10:00:04Z", "run": "triage-2026-10-21", "seq": 3, "kind": "tool_call", "name": "classify_ticket", "data": {"ticket_ref": "t-991"}}
+{"v": 1, "ts": "2026-10-21T10:00:05Z", "run": "triage-2026-10-21", "seq": 4, "kind": "tool_result", "name": "classify_ticket", "parent": 3, "dur_ms": 210, "ok": true}
+{"v": 1, "ts": "2026-10-21T10:00:06Z", "run": "triage-2026-10-21", "seq": 5, "kind": "message", "name": "handoff-note", "data": {"handoff": {"from": "triage-agent", "to": "billing-agent", "context_sha256": "f3a91c…", "reason": "refund decision needed"}}}
+{"v": 1, "ts": "2026-10-21T10:00:06Z", "run": "triage-2026-10-21", "seq": 6, "kind": "run_end", "name": "triage-agent", "ok": true}
+{"v": 1, "ts": "2026-10-21T10:00:07Z", "run": "billing-2026-10-21", "seq": 1, "kind": "run_start", "name": "billing-agent"}
+{"v": 1, "ts": "2026-10-21T10:00:08Z", "run": "billing-2026-10-21", "seq": 2, "kind": "prompt", "name": "handoff-context", "data": {"handoff": {"from": "triage-agent", "to": "billing-agent", "context_sha256": "f3a91c…"}}}
+{"v": 1, "ts": "2026-10-21T10:00:12Z", "run": "billing-2026-10-21", "seq": 3, "kind": "tool_call", "name": "issue_refund", "data": {"ticket_ref": "t-991"}}
+{"v": 1, "ts": "2026-10-21T10:00:13Z", "run": "billing-2026-10-21", "seq": 4, "kind": "tool_result", "name": "issue_refund", "parent": 3, "dur_ms": 480, "ok": true, "cost": "0.0011"}
+{"v": 1, "ts": "2026-10-21T10:00:14Z", "run": "billing-2026-10-21", "seq": 5, "kind": "message", "name": "assistant-reply", "data": {"sha256": "77be02…", "note": "refund issued"}}
+{"v": 1, "ts": "2026-10-21T10:00:14Z", "run": "billing-2026-10-21", "seq": 6, "kind": "run_end", "name": "billing-agent", "ok": true}
