@@ -60,6 +60,9 @@ python src/tracetape.py …
 | `validate … --allow-incomplete` | Unterminated runs count as warnings — for tapes still being written by a live agent. |
 | `validate … --format json` | Machine-readable report: per-file errors / warnings / incomplete runs. |
 | `summary <file>` | Per-run profile: event counts by kind, tool usage table, token totals, Decimal-exact cost total, wall-clock span, longest step, and the error list with seq references. Multi-run files get one block per run plus totals. |
+| `handoffs <file>` | Audit the multi-agent handoff chain (below): every hand-off, its attestation state, chain breaks, and hand-offs nobody answered. Exit `1` on any finding. |
+| `bundle <tape> [--claims F] [--skill DIR] [--cost F] [--schema F] [--trustbadge F] [--report F …]` | Seal a tape plus its companion evidence into one **proof bundle** (below): every artifact named by its SHA-256, the bundle itself digest-sealed. The tape must validate clean — an invalid tape is refused (exit `1`), never sealed. |
+| `verify <bundle.json>` | Re-check a proof bundle against the files on disk: envelope + digest, every sealed file's presence and hash, the tape's continued validity, the claims and skill manifests. Exit `1` on any finding. |
 | `init` | Scaffold a sample `trace.jsonl` (one complete run, including a *handled* error) + `EXPECTED.md`. |
 
 Exit codes: `0` = clean, `1` = validation errors (or warnings under
@@ -159,6 +162,68 @@ Incomplete runs get their own heading on purpose: a crashed agent
 and a corrupt tape look identical in a line count, and they need
 different responses.
 
+## Handoff events
+
+Multi-agent work is a chain of hand-offs, and the chain is where
+context silently rots. A hand-off is a data convention — any event
+whose `data` carries `{"handoff": {"from": …, "to": …,
+"context_sha256": …}}` (full spec in `TRACE_FORMAT.md`). The
+receiver may record the same hand-off in its own run as a receipt
+echo. `handoffs` audits the chain:
+
+```
+$ tracetape handoffs examples/handoff.jsonl
+====================================================================
+TraceTape — handoff chain
+====================================================================
+File: examples/handoff.jsonl
+  run triage-2026-10-21 · seq 5 · triage-agent → billing-agent (attested)
+  run billing-2026-10-21 · seq 2 · triage-agent → billing-agent (attested)
+
+Result: ✅ CLEAN — 2 handoff(s), 0 finding(s)
+```
+
+Three finding classes: `handoff-unattested` (no context hash — the
+tape proves a hand-off happened, not what was handed over),
+`handoff-chain` (the receiver of one hand-off is not the sender of
+the next), and `handoff-unanswered` (the receiver neither hands
+off onward nor starts a run on the tape). Malformed payloads are
+`handoff-shape` warnings in `validate` — named, never fatal.
+
+## Proof bundles
+
+A tape is evidence; a proof bundle seals that evidence for handing
+to someone else. `bundle` writes one JSON document — the tape, a
+claims file (per-claim hashes), a skill manifest (per-file hashes),
+sibling tool reports, a cost record, a schema contract and a
+TrustBadge score — every artifact named by the SHA-256 of its
+bytes, and the bundle itself digest-sealed (`bundle_sha256` over
+its canonical JSON, so editing the sealed TrustBadge score breaks
+the seal).
+
+```
+$ tracetape bundle examples/good.jsonl --claims report.md \
+      --skill ./my-skill --cost ledger.json --out bundle.json
+$ tracetape verify bundle.json
+====================================================================
+TraceTape — bundle verification
+====================================================================
+Bundle: bundle.json
+  tape             ok
+  claims           ok
+  skill_manifest   ok
+  cost_record      ok
+
+Result: ✅ VERIFIED — 0 finding(s)
+```
+
+`verify` fails (exit `1`) with named findings — `missing-evidence`,
+`hash-mismatch`, `tape-invalid`, `tape-drift`, `claims-drift`,
+`manifest-drift`, `bundle-digest` — the moment any sealed artifact
+is gone or has changed. The full format lives in `TRACE_FORMAT.md`.
+AgentCI's `bundle` command builds regression gates on top of
+bundles (evidence loss, cost budget, score degradation).
+
 ## Adopting the format
 
 Emitting a tape is a few lines in any agent loop: open the file at
@@ -231,7 +296,7 @@ On a caller error the tool also prints one JSON line to stderr:
 `{"error": {"code": "file_not_found", "message": "no such file: x"}}`.
 
 JSON output (`--format json`) always carries the family envelope —
-`{"tool": "tracetape", "version": "1.0.0", "schema_version": 1}` — alongside
+`{"tool": "tracetape", "version": "1.1.0", "schema_version": 1}` — alongside
 the tool's own payload keys, unchanged.
 
 ## Part of AgentForge
